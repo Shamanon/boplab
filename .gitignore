@@ -1,0 +1,19 @@
+# Virtual Environments
+oww_env/
+.venv/
+env/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Heavy Machine Learning Weights (Crucial!)
+*.onnx
+*.bin
+*.pt
+*.pth
+
+# Environment / Secret tokens
+.env
