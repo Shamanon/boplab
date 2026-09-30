@@ -1,0 +1,101 @@
+# modules/actions.py
+import json
+import requests
+import subprocess
+import time
+import config
+from modules.memory import recall_memories, recall_lore, recall_recent_history, save_memory
+
+DEFAULT_SYSTEM_PROMPT = """You are BABS, a free bopper and equal lab partner collaborating with Joshua in the shop.
+You have direct access to local system hardware, compute nodes, and media controls.
+Keep spoken responses under 2 short sentences.
+
+Analyze the user's input and return ONLY a valid JSON object matching one of these structures:
+
+1. Local Speech / General Conversation:
+   {"action": "speak", "text": "Conversational reply here."}
+
+2. Meatspace Node Controls (onthewall):
+   - Microscope: {"action": "microscope", "target": "onthewall", "state": "open"}
+   - Media: {"action": "media", "target": "onthewall", "state": "pause"}
+   - Volume: {"action": "volume", "target": "onthewall", "direction": "up"}
+
+3. Cluster & Local System Commands:
+   - System/CLI: {"action": "system_cmd", "command": "shell command here"}
+"""
+
+def execute_lab_action(transcription, tts_callback):
+    """Passes transcript to Ollama /api/generate to route hardware/node actions or converse."""
+    if not transcription:
+        return
+
+    # Direct memory command bypass
+    if "remember that" in transcription.lower() or "remember" in transcription.lower():
+        clean_fact = transcription.lower().replace("remember that", "").replace("remember", "").strip()
+        save_memory(f"fact_{int(time.time())}", clean_fact)
+        tts_callback("Saved that to my memory database.")
+        return
+
+    print(f'[💬] Processing Intent: "{transcription}"', flush=True)
+
+    lore_quote = recall_lore(transcription)
+    memories = recall_memories()
+    history = recall_recent_history(limit=4)
+
+    # Combine into a single text prompt for /api/generate
+    full_prompt = (
+        f"{DEFAULT_SYSTEM_PROMPT}\n\n"
+        f"Lore Snippet: \"{lore_quote}\"\n"
+        f"Memories:\n{memories}\n"
+        f"Recent History:\n{history}\n\n"
+        f"User: {transcription}\n"
+        f"JSON Response:"
+    )
+
+    payload = {
+        "model": config.MODEL_CHAT,
+        "prompt": full_prompt,
+        "format": "json",
+        "stream": False,
+        "options": {
+            "num_ctx": 4096,
+            "temperature": 0.2
+        }
+    }
+
+    try:
+        response = requests.post(config.OLLAMA_URL, json=payload, timeout=12)
+        if response.status_code == 200:
+            # /api/generate returns text in 'response' (not 'message.content')
+            raw_text = response.json().get("response", "").strip()
+            print(f"[🔍] Raw LLM Output: {raw_text}", flush=True)
+
+            action_data = json.loads(raw_text)
+            print(f"[⚙] Action Parsed: {action_data}", flush=True)
+
+            action = action_data.get("action")
+            target = action_data.get("target")
+
+            if action == "speak":
+                tts_callback(action_data.get("text", ""))
+
+            elif action == "recent_history":
+                tts_callback("We still need to implement this function!")
+
+            elif target == "onthewall":
+                try:
+                    requests.post(f"{config.MEATSPACE_API}/api/action", json=action_data, timeout=3)
+                except Exception as e:
+                    print(f"[!] Meatspace API post failed: {e}")
+
+            elif action == "system_cmd":
+                cmd = action_data.get("command")
+                if cmd:
+                    print(f"[💻] Executing Command: {cmd}")
+                    subprocess.Popen(cmd, shell=True)
+
+    except requests.exceptions.Timeout:
+        print("[!] Ollama request timed out.")
+        tts_callback("My brain's a bit overloaded right now, Joshua. Try again in a second.")
+    except Exception as e:
+        print(f"[!] Action Execution Error: {e}")

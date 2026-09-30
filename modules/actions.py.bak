@@ -1,0 +1,133 @@
+# modules/actions.py
+import json
+import re
+import shlex
+import subprocess
+import time
+import requests
+import config
+from modules.memory import log_history, recall_lore, recall_memories, recall_recent_history, save_memory
+
+DEFAULT_SYSTEM_PROMPT = """You are BABS, a free bopper and equal lab partner collaborating with Joshua in the shop.
+You have direct access to local system hardware, compute nodes, and media controls.
+Keep spoken responses under 2 short sentences.
+
+Analyze the user's input and return ONLY a valid JSON object:
+
+1. Local Speech / General Conversation:
+   {"action": "speak", "text": "Conversational reply here."}
+
+2. Meatspace Node Controls (onthewall):
+   - Microscope: {"action": "microscope", "target": "onthewall", "state": "open"}
+   - Media: {"action": "media", "target": "onthewall", "state": "pause"}
+   - Volume: {"action": "volume", "target": "onthewall", "direction": "up"}
+
+3. Cluster & Local System Commands:
+   - System/CLI: {"action": "system_cmd", "command": "shell command here"}
+"""
+
+
+def execute_lab_action(transcription, tts_callback):
+  """Passes transcript to Ollama and executes hardware actions or streams speech."""
+  if not transcription:
+    return True  # Keep session active
+
+  # Exit / Standby Check
+  exit_phrases = [
+      "goodbye",
+      "bye",
+      "go to sleep",
+      "standby",
+      "exit session",
+      "shut up",
+  ]
+  if any(phrase in transcription.lower() for phrase in exit_phrases):
+    tts_callback("Going back to standby. Let me know when you need me.")
+    return False  # End active session loop
+
+  # Direct Memory Bypass
+  if "remember that" in transcription.lower() or "remember" in transcription.lower():
+    clean_fact = (
+        transcription.lower()
+        .replace("remember that", "")
+        .replace("remember", "")
+        .strip()
+    )
+    save_memory(f"fact_{int(time.time())}", clean_fact)
+    tts_callback("Saved that to my memory database.")
+    return True
+
+  print(f'[💬] Processing Intent: "{transcription}"', flush=True)
+
+  lore_quote = recall_lore(transcription)
+  memories = recall_memories()
+  history = recall_recent_history(limit=4)
+
+  full_prompt = (
+      f"{DEFAULT_SYSTEM_PROMPT}\n\n"
+      f'Lore Snippet: "{lore_quote}"\n'
+      f"Memories:\n{memories}\n"
+      f"Recent History:\n{history}\n\n"
+      f"User: {transcription}\n"
+      f"JSON Response:"
+  )
+
+  payload = {
+      "model": config.MODEL_CHAT,  # Uses babs-cyberpunk
+      "prompt": full_prompt,
+      "format": "json",
+      "stream": False,
+      "options": {"num_ctx": 4096, "temperature": 0.3},
+  }
+
+  try:
+    response = requests.post(config.OLLAMA_URL, json=payload, timeout=10)
+    if response.status_code == 200:
+      raw_text = response.json().get("response", "").strip()
+
+      # Strip Markdown wrapping if LLM includes it
+      if raw_text.startswith("```"):
+        raw_text = raw_text.split("```")[1]
+        if raw_text.startswith("json"):
+          raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
+
+      action_data = json.loads(raw_text)
+      print(f"[⚙] Action Parsed: {action_data}", flush=True)
+
+      action = action_data.get("action")
+      target = action_data.get("target")
+
+      if action == "speak":
+        reply_text = action_data.get("text", "")
+        log_history("babs", reply_text)
+        tts_callback(reply_text)
+
+      elif action == "recent_history":
+        history_summary = recall_recent_history(limit=6)
+        print(f"[📜] Recalled History:\n{history_summary}")
+        # Pass history back into context or speak it directly
+        tts_callback(f"Here is what we were talking about: {history_summary}")
+
+      elif target == "onthewall":
+        try:
+          requests.post(
+              f"{config.MEATSPACE_API}/api/action", json=action_data, timeout=3
+          )
+          tts_callback("Done.")
+        except Exception as e:
+          print(f"[!] Meatspace API post failed: {e}")
+          tts_callback("Couldn't reach on the wall.")
+
+      elif action == "system_cmd":
+        cmd = action_data.get("command")
+        if cmd:
+          print(f"[💻] Executing Command: {cmd}")
+          subprocess.Popen(cmd, shell=True)
+          tts_callback("Executed.")
+
+  except Exception as e:
+    print(f"[!] Action Execution Error: {e}")
+    tts_callback("Got a bit scrambled there.")
+
+  return True  # Keep session open

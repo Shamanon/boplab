@@ -1,7 +1,8 @@
 # Virtual Environments
 oww_env/
-.venv/
+venv/
 env/
+env_312/
 
 # Python caching
 __pycache__/
@@ -17,3 +18,16 @@ __pycache__/
 
 # Environment / Secret tokens
 .env
+
+# Learning Databases
+db/
+books/
+models/
+*_cache/
+MMaker/
+
+# Backups from testing
+bak/
+
+# Logs
+*.log
