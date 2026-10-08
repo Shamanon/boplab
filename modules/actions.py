@@ -51,6 +51,8 @@ KNOWN_ACTIONS = {
     "run_search",
     "deep_search",
     "deep_research",
+    "agent",
+    "bop",
 }
 
 # Destructive command blocklist guardrails
@@ -66,6 +68,38 @@ BLOCKED_COMMAND_PATTERNS = [
     r"k3s\s+uninstall",
 ]
 
+# System execution schema exposed to Ollama
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_shell_command",
+            "description": "Execute bash commands in ~/boplab or ~/k3s-config",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "The exact shell command to run"}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_repository_file",
+            "description": "Read file contents from local directories",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "Relative or absolute file path"}
+                },
+                "required": ["filepath"]
+            }
+        }
+    }
+]
+
 
 def is_command_safe(command):
     """Verifies that a system command contains no destructive operations."""
@@ -73,6 +107,37 @@ def is_command_safe(command):
         if re.search(pattern, command, re.IGNORECASE):
             return False
     return True
+
+
+def execute_agent_task(prompt):
+    messages = [{"role": "user", "content": prompt}]
+
+    while True:
+        response = requests.post("http://localhost:31434/api/chat", json={
+            "model": "babs-cyberpunk",
+            "messages": messages,
+            "tools": tools,
+            "stream": False
+        }).json()["message"]
+
+        messages.append(response)
+
+        # Check if the model requested tool executions
+        if not response.get("tool_calls"):
+            # Model finished reasoning and delivered final output
+            return response["content"]
+
+        for tool in response["tool_calls"]:
+            func_name = tool["function"]["name"]
+            args = tool["function"]["arguments"]
+
+            if func_name == "run_shell_command":
+                output = subprocess.getoutput(args["command"])
+                messages.append({
+                    "role": "tool",
+                    "content": output,
+                    "name": func_name
+                })
 
 
 def execute_lab_action(transcription, tts_callback):
@@ -117,7 +182,7 @@ def execute_lab_action(transcription, tts_callback):
     }
 
     try:
-        response = requests.post(config.OLLAMA_URL, json=payload, timeout=10)
+        response = requests.post(config.OLLAMA_URL, json=payload, timeout=30)
         if response.status_code == 200:
             raw_text = response.json().get("response", "").strip()
 
@@ -144,6 +209,16 @@ def execute_lab_action(transcription, tts_callback):
                 reply_text = action_data.get("text", "")
                 log_history("babs", reply_text)
                 tts_callback(reply_text)
+            # agentic actions
+            elif action in ("agent","bop"):
+                tts_callback(f"Woah, Ok! Time to Bop! What's the plan?")
+                time.sleep(0.5)
+                search_for = babs.record_active_speech()
+                search_string = stt.transcribe_audio(search_for)
+                print(f"[💻] Running agent mode:\n{search_string}")
+                print(f"[💡] Executing multi step task.")
+                agent_results = execute_agent_action(search_string)
+                tss_callback(agent_results)
             # System diagnostic
             elif action in ("diagnostic", "status", "health_check"):
               print("[🩺] Running System Diagnostic Subsystem...")
@@ -158,11 +233,10 @@ def execute_lab_action(transcription, tts_callback):
                 print(f"[!] Diagnostic execution error: {e}")
                 tts_callback("I ran into an error pulling system diagnostics, Joshua.")
             # Recal recent history
-            elif action == "recent_history" or action =="recall_history":
+            elif action in ("recent_history","recall_history"):
                 history_summary = recall_recent_history(limit=4)
                 print(f"[📜] Recalled History:\n{history_summary}")
                 tts_callback(f"Here is our recent chat: {history_summary}")
-
             # Run a deep search with searxng
             elif action in ("search","run_search","deep_search","deep_research"):
                 tts_callback("What do you want to research?")

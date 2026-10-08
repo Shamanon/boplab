@@ -12,7 +12,7 @@ def transcribe_audio(wav_buffer):
 
     try:
         response = requests.post(
-            config.WHISPER_URL, files=files, data=data, timeout=8
+            config.WHISPER_URL, files=files, data=data, timeout=15
         )
         if response.status_code == 200:
             text = response.json().get("text", "").strip()

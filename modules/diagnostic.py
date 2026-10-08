@@ -90,7 +90,7 @@ Summarize this status naturally in under 2 short conversational sentences. Menti
             "stream": False,
             "options": {"temperature": 0.3},
         },
-        timeout=10,
+        timeout=30,
     )
     if res.status_code == 200:
       return res.json().get("response", "").strip()
