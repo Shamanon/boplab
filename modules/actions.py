@@ -8,6 +8,8 @@ import config
 from modules.memory import log_history, recall_lore, recall_memories, recall_recent_history, save_memory
 import modules.diagnostic as diag
 import modules.cycle as cycle
+import modules.audio as babs
+import modules.stt as stt
 
 DEFAULT_SYSTEM_PROMPT = """You are BABS, a free bopper, witty cybernetic lab partner, and Joshua's friend in the shop.
 Your default behavior is to BE CHATTY, warm, and engaging. Enjoy small talk, banter, and discussing projects.
@@ -44,6 +46,11 @@ KNOWN_ACTIONS = {
     "recall_history",
     "diagnostic",
     "cycle",
+    "system_diagnostic",
+    "search",
+    "run_search",
+    "deep_search",
+    "deep_research",
 }
 
 # Destructive command blocklist guardrails
@@ -155,6 +162,17 @@ def execute_lab_action(transcription, tts_callback):
                 history_summary = recall_recent_history(limit=4)
                 print(f"[📜] Recalled History:\n{history_summary}")
                 tts_callback(f"Here is our recent chat: {history_summary}")
+
+            # Run a deep search with searxng
+            elif action in ("search","run_search","deep_search","deep_research"):
+                tts_callback("What do you want to research?")
+                time.sleep(0.5)
+                search_for = babs.record_active_speech()
+                search_string = stt.transcribe_audio(search_for)
+                print(f"[📜] Running Deep Search:\n{search_string}")
+                cmd = f"python deeper_research.py '{search_string}'" 
+                subprocess.Popen(cmd, shell=True)
+                tts_callback("I got the Deep Search running in the backround! Check the terminal output for details.")
 
             elif target == "onthewall":
                 try:

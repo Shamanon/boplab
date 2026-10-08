@@ -25,6 +25,7 @@ books/
 models/
 *_cache/
 MMaker/
+research_*
 
 # Backups from testing
 bak/

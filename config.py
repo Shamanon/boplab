@@ -21,15 +21,15 @@ SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280
 
 # Dynamic VAD & Audio Thresholds
-SILENCE_THRESHOLD = 1500
+SILENCE_THRESHOLD = 2500
 SILENCE_DURATION = 1.0
 MAX_RECORD_SECONDS = 15
 WAKE_THRESHOLD = 0.5
 
 # Models
-OLLAMA_MODEL = "BopWare"
-MODEL_CHAT = "BopWare"
-MODEL_CODER = "qwen2.5-coder"
+OLLAMA_MODEL = "babs-cyberpunk" #"llama3.2:3b"
+MODEL_CHAT = "babs-cyberpunk"
+MODEL_CODER = "babs-cyberpunk" #"qwen2.5-coder"
 
 # Common Whisper hallucinations
 WHISPER_HALLUCINATIONS = [
